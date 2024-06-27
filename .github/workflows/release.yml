@@ -16,10 +16,10 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: amd64
-            ext: ".exe"
+            ext: ""
           - os: ubuntu-latest
             arch: arm64
-            ext: ".exe"
+            ext: ""
 
     runs-on: ${{ matrix.os }}
 
