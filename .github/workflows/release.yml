@@ -1,29 +1,99 @@
-name: Release CLI to the GitHub Release
+name: Release
+
+name: Create Release Note
 
 on:
-  push:
-    tags:
-      - "v*"
+  pull_request:
+    types:
+      - closed
+    branches:
+      - master
+
+permissions: write-all
 
 jobs:
-  release:
-    name: Release
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            ext: ""
+          - os: ubuntu-latest
+            arch: arm64
+            ext: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.14' # 必要なGoのバージョンを指定
+
+      - name: Build
+        run: |
+          GOOS=$(echo ${{ matrix.os }} | cut -d'-' -f1)
+          GOARCH=${{ matrix.arch }}
+          EXT=${{ matrix.ext }}
+          OUTPUT=build/myapp-${{ matrix.os }}-${{ matrix.arch }}${EXT}
+          mkdir -p $(dirname $OUTPUT)
+          go build -o $OUTPUT
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.arch }}
+          path: build/myapp-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+
+  create-release:
+    needs: [build]
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Sources
-        uses: actions/checkout@v2
-      - name: Bump-up Semantic Version
-        uses: kyoh86/git-vertag-action@v1.1
+      - name: Create Release Tag And Note
+        env:
+          # このトークンは自動生成されるのでsecretsを登録する必要ない
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PRのタイトルと内容をRelease内容に追加する
+          RELEASE_TAG: ${{ github.event.pull_request.title }}
+        uses: release-drafter/release-drafter@v5
         with:
-          # method: "major", "minor" or "patch" to update tag with semver
-          method: "${{ github.event.inputs.method }}"
-      - name: Setup Go
-        uses: actions/setup-go@v2
+          tag: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          version: ${{ env.RELEASE_TAG }}
+          publish: true
+
+  upload-release:
+    needs: [create-release]
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            ext: ""
+          - os: ubuntu-latest
+            arch: arm64
+            ext: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v3
         with:
-          go-version: 1.14
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v2
+          name: build-${{ matrix.os }}-${{ matrix.arch }}
+          path: build/
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: release --rm-dist
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: build/myapp-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+          asset_name: myapp-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+          asset_content_type: application/octet-stream
